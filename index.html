@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="theme-color" content="#1e3a5f">
+<title>Leitor rápido RB</title>
+<style>
+:root{--azul:#1e3a5f;--ok:#16a34a;--er:#dc2626;--am:#d97706}
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#0f172a;color:#111}
+header{background:var(--azul);color:#fff;padding:10px 14px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+header b{font-size:17px}
+header button{width:auto;margin:0;padding:8px 12px;font-size:14px;background:#ffffff22;color:#fff}
+main{max-width:560px;margin:0 auto;padding:0}
+.card{background:#f3f5f9;padding:14px 16px}
+label{display:block;font-size:14px;font-weight:700;margin:12px 0 4px}
+select,input,button{width:100%;font-size:19px;padding:13px;border-radius:10px;border:1px solid #c7cdd8;background:#fff}
+button{background:#1f4fa3;color:#fff;border:0;font-weight:800;margin-top:12px;cursor:pointer}
+button.s{background:#e5e7eb;color:#111}
+#status{background:#fff;padding:10px 14px;font-size:16px;border-bottom:3px solid var(--azul)}
+#status .onde{font-size:22px;font-weight:900;color:var(--azul)}
+#cam{position:relative;background:#000}
+#reader{width:100%}
+#reader video{width:100%!important;display:block}
+#flash{position:absolute;inset:0;pointer-events:none;opacity:0;transition:opacity .25s}
+#ultimo{background:#fff;padding:12px 14px;font-size:20px;font-weight:800;min-height:56px}
+#ultimo.ok{background:#dcfce7;color:#166534}#ultimo.er{background:#fee2e2;color:#b91c1c}#ultimo.am{background:#fef3c7;color:#92400e}#ultimo.in{background:#e0ecff;color:#1e3a5f}
+#cont{display:flex;gap:8px;background:#fff;padding:8px 14px;font-size:14px;border-top:1px solid #e5e7eb}
+#cont div{flex:1;text-align:center}#cont b{display:block;font-size:22px}
+#lista{background:#fff;padding:0 14px 14px;font-size:14px}
+#lista div{padding:6px 0;border-bottom:1px solid #eef1f5}
+.mini{font-size:13px;color:#555;margin-top:6px}
+#bt{position:absolute;left:-9999px;opacity:0}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;background:#e5e7eb;font-size:12px}
+</style>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+</head>
+<body>
+<header><b>Leitor rápido · RB</b><button id="btnTrocar" style="display:none">Trocar</button></header>
+<main>
+
+<!-- CONFIGURAÇÃO (só na primeira vez em cada celular) -->
+<div class="card" id="pgCfg" style="display:none">
+  <div id="boxUrl"><label>Link do script (o endereço que termina em /exec)</label><input id="cUrl" placeholder="https://script.google.com/macros/s/.../exec"></div>
+  <label>Quem está lendo?</label><select id="cPessoa"></select>
+  <label>Senha</label><input id="cSenha" type="password" placeholder="senha do leitor">
+  <button id="cOk">Começar a ler</button>
+  <p class="mini">Este celular guarda essas escolhas. Para trocar depois, toque em "Trocar" no alto.</p>
+</div>
+
+<!-- LEITURA -->
+<div id="pgLer" style="display:none">
+  <div id="status"></div>
+  <div id="boxFicha" class="card" style="display:none;padding:8px 14px"><label style="margin-top:0">A ficha lida vai para</label><select id="destFicha"></select></div>
+  <div id="cam"><div id="reader"></div><div id="flash"></div></div>
+  <div id="ultimo" class="in">Aponte a câmera para a bolachinha.</div>
+  <div id="cont"><div><b id="nHoje">0</b>lidas hoje</div><div><b id="nFila">0</b>a enviar</div><div><b id="nEnv">0</b>enviadas</div></div>
+  <div class="card" style="padding:8px 14px">
+    <button class="s" id="btnBt">Usar leitor Bluetooth (sem câmera)</button>
+    <input id="bt" autocomplete="off" inputmode="none">
+    <label>Ou digite o código</label><input id="manual" placeholder="Ex.: RB100123" autocomplete="off">
+  </div>
+  <div id="lista"></div>
+</div>
+</main>
+
+<script>
+/* ================= configuração ================= */
+const PESSOAS=[
+ {nome:'Estoque (baias)',setor:'',modo:'baia'},
+ {nome:'Kauane (ficha de produção)',setor:'Overlock 1',modo:'ficha'},
+ {nome:'Vinícius (corte)',setor:'Corte',modo:'setor'},
+ {nome:'Beth (Overlock 1)',setor:'Overlock 1',modo:'setor'},
+ {nome:'Lu (Overlock 2)',setor:'Overlock 2',modo:'setor'},
+ {nome:'Francisca (Reta)',setor:'Reta',modo:'setor'},
+ {nome:'Ana Paula (Acabamento)',setor:'Acabamento',modo:'setor'},
+ {nome:'Revisão',setor:'Revisão',modo:'setor'},
+ {nome:'Expedição',setor:'Expedição',modo:'setor'}];
+const DESTINOS=['Overlock 1','Overlock 2','Reta','Acabamento'];
+const $=id=>document.getElementById(id);
+const LS={get:(k,d)=>{try{let v=localStorage.getItem(k);return v==null?d:JSON.parse(v)}catch(e){return d}},set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+const q=new URLSearchParams(location.search);if(q.get('s'))LS.set('rb_url',q.get('s'));
+let URL_S=LS.get('rb_url',''),pessoa=null,baia=LS.get('rb_baia',''),leitor=null,ult={c:'',t:0};
+let fila=LS.get('rb_fila',[]),hoje=LS.get('rb_hoje',{d:'',n:0,codes:[]}),enviadas=0,enviando=false;
+function hojeStr(){let d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+if(hoje.d!==hojeStr())hoje={d:hojeStr(),n:0,codes:[]};
+
+/* ================= telas ================= */
+function telaCfg(){$('pgLer').style.display='none';$('pgCfg').style.display='block';$('btnTrocar').style.display='none';parar();
+ $('boxUrl').style.display=URL_S?'none':'block';$('cPessoa').innerHTML=PESSOAS.map((p,i)=>'<option value="'+i+'">'+p.nome+'</option>').join('');
+ let i=LS.get('rb_pessoa',null);if(i!=null)$('cPessoa').value=i;if(LS.get('rb_senha',''))$('cSenha').placeholder='senha já salva neste celular'}
+$('cOk').onclick=()=>{if(!URL_S){let u=$('cUrl').value.trim();if(!/^https:\/\/script\.google\.com\//.test(u)){alert('Cole o link do script (começa com https://script.google.com/).');return}URL_S=u;LS.set('rb_url',u)}
+ if($('cSenha').value)LS.set('rb_senha',$('cSenha').value);if(!LS.get('rb_senha','')){alert('Digite a senha.');return}
+ LS.set('rb_pessoa',$('cPessoa').value);telaLer()};
+$('btnTrocar').onclick=telaCfg;
+function telaLer(){pessoa=PESSOAS[LS.get('rb_pessoa',3)]||PESSOAS[3];$('pgCfg').style.display='none';$('pgLer').style.display='block';$('btnTrocar').style.display='inline-block';
+ $('destFicha').innerHTML=DESTINOS.map(d=>'<option>'+d+'</option>').join('');$('destFicha').value=LS.get('rb_dest','Overlock 1');$('destFicha').onchange=()=>LS.set('rb_dest',$('destFicha').value);
+ $('boxFicha').style.display=pessoa.modo==='ficha'?'block':'none';status();contadores();lista();iniciarCamera();enviar()}
+function onde(){return pessoa.modo==='baia'?(baia||''):pessoa.setor}
+function status(){let o=onde();$('status').innerHTML='<div>'+pessoa.nome+'</div><div class="onde">'+(pessoa.modo==='baia'?(o?'Entrando na '+o:'Leia primeiro o QR da baia'):(pessoa.modo==='ficha'?'Fichas e lotes → '+$('destFicha').value:'Lotes entram em '+o))+'</div>'}
+
+/* ================= câmera ao vivo ================= */
+function iniciarCamera(){parar();try{leitor=new Html5Qrcode('reader',{verbose:false});
+ leitor.start({facingMode:'environment'},{fps:12,qrbox:(w,h)=>{let s=Math.floor(Math.min(w,h)*0.7);return {width:s,height:s}},aspectRatio:1.0},t=>ler(t),()=>{})
+ .catch(e=>{$('reader').innerHTML='<div style="color:#fff;padding:20px;font-size:16px">Não consegui abrir a câmera. Verifique se o Chrome tem permissão de câmera (cadeado ao lado do endereço → Permissões → Câmera: Permitir) e recarregue a página.</div>'})}catch(e){}}
+function parar(){try{if(leitor){leitor.stop().catch(()=>{});leitor=null}}catch(e){}}
+document.addEventListener('visibilitychange',()=>{if(document.hidden)parar();else if($('pgLer').style.display==='block'&&!btModo)iniciarCamera()});
+
+/* ================= leitor Bluetooth (funciona como teclado) ================= */
+let btModo=false;
+$('btnBt').onclick=()=>{btModo=!btModo;$('btnBt').textContent=btModo?'Voltar para a câmera':'Usar leitor Bluetooth (sem câmera)';if(btModo){parar();$('cam').style.display='none';$('bt').focus();aviso('Leitor Bluetooth pronto: é só apertar o botão do leitor.','in')}else{$('cam').style.display='block';iniciarCamera()}};
+$('bt').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();ler($('bt').value);$('bt').value=''}});
+$('bt').addEventListener('blur',()=>{if(btModo)setTimeout(()=>$('bt').focus(),50)});
+$('manual').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();ler($('manual').value);$('manual').value=''}});
+
+/* ================= leitura ================= */
+function bip(ok){try{let ac=bip.ac||(bip.ac=new (window.AudioContext||window.webkitAudioContext)()),o=ac.createOscillator(),g=ac.createGain();o.frequency.value=ok?1250:300;o.connect(g);g.connect(ac.destination);g.gain.value=0.25;o.start();o.stop(ac.currentTime+(ok?0.09:0.35))}catch(e){}if(navigator.vibrate)navigator.vibrate(ok?60:[120,60,120])}
+function piscar(cor){let f=$('flash');f.style.background=cor;f.style.opacity=.55;setTimeout(()=>f.style.opacity=0,220)}
+function aviso(t,c){let u=$('ultimo');u.className=c;u.textContent=t}
+function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,9)}
+function ler(raw){let t=String(raw||'').trim();if(!t)return;let agora=Date.now();if(t===ult.c&&agora-ult.t<3500)return;ult={c:t,t:agora};
+ let mb=t.match(/[?&]b=(\d+)/)||t.toUpperCase().match(/^RBB\s*(\d+)$/);
+ if(mb){if(pessoa.modo!=='baia'){aviso('Esse é o QR de uma baia. Para lotes de baia, escolha "Estoque (baias)" em Trocar.','am');bip(false);return}baia='Baia '+Number(mb[1]);LS.set('rb_baia',baia);status();aviso(baia+' escolhida. Agora as bolachinhas.','in');bip(true);piscar('#3b82f6');return}
+ let c=t.toUpperCase().replace(/\s+/g,''),mf=c.match(/^RBF(\d+)$/),ml=c.match(/^RB?(\d{6})$/);
+ if(!mf&&!ml){aviso('QR não reconhecido: '+t.slice(0,40),'er');bip(false);piscar('#dc2626');return}
+ let setor=mf?(pessoa.modo==='ficha'?$('destFicha').value:pessoa.setor):onde();
+ if(!setor){aviso('Leia primeiro o QR da baia.','er');bip(false);piscar('#dc2626');return}
+ let chave=c+'>'+setor;if(hoje.codes.includes(chave)){aviso('Já lido hoje: '+c+' → '+setor,'am');bip(false);piscar('#d97706');return}
+ hoje.codes.push(chave);if(hoje.codes.length>3000)hoje.codes=hoje.codes.slice(-3000);hoje.n++;LS.set('rb_hoje',hoje);
+ let item={id:uid(),codigo:c,setor:setor,por:pessoa.nome,at:new Date().toISOString()};fila.push(item);LS.set('rb_fila',fila);
+ aviso('✓ '+(mf?'Ficha '+mf[1]:'Lote '+c)+' → '+setor,'ok');bip(true);piscar('#16a34a');
+ let h=LS.get('rb_lista',[]);h.unshift(new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})+' · '+c+' → '+setor);LS.set('rb_lista',h.slice(0,30));lista();contadores();enviarLogo()}
+function lista(){$('lista').innerHTML=LS.get('rb_lista',[]).map(x=>'<div>'+x+'</div>').join('')}
+function contadores(){$('nHoje').textContent=hoje.n;$('nFila').textContent=fila.length;$('nEnv').textContent=enviadas}
+
+/* ================= envio para a planilha (em lote, com fila se cair a internet) ================= */
+let tEnv=null;function enviarLogo(){clearTimeout(tEnv);tEnv=setTimeout(enviar,1200)}
+async function enviar(){if(enviando||!fila.length||!URL_S)return;enviando=true;let lote=fila.slice(0,100);
+ try{let r=await fetch(URL_S,{method:'POST',body:JSON.stringify({senha:LS.get('rb_senha',''),itens:lote})});let j=await r.json();
+  if(!j.ok){if(/Senha/i.test(j.erro||'')){aviso('Senha errada. Toque em Trocar e digite de novo.','er');LS.set('rb_senha','')}else aviso('A planilha recusou: '+(j.erro||'erro'),'er')}
+  else{let ids=new Set(lote.map(x=>x.id));fila=fila.filter(x=>!ids.has(x.id));LS.set('rb_fila',fila);enviadas+=j.gravados||lote.length}}
+ catch(e){/* sem internet: fica na fila e tenta de novo */}
+ finally{enviando=false;contadores();if(fila.length)setTimeout(enviar,fila.length>100?500:8000)}}
+setInterval(enviar,15000);window.addEventListener('online',enviar);
+
+/* ================= início ================= */
+if(URL_S&&LS.get('rb_senha','')&&LS.get('rb_pessoa',null)!=null)telaLer();else telaCfg();
+</script>
+</body>
+</html>
